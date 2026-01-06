@@ -46,8 +46,10 @@ let knowledgeScroll = ref()
 let page = 1;
 let pageSize = 35;
 
-const selectedTagId = ref<string>("__untagged__");
+const UNTAGGED_TAG_ID = '__untagged__';
+const selectedTagId = ref<string>(UNTAGGED_TAG_ID);
 const tagList = ref<any[]>([]);
+const untaggedCount = ref(0);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
 const TAG_PAGE_SIZE = 50;
@@ -59,7 +61,6 @@ let tagSearchDebounce: ReturnType<typeof setTimeout> | null = null;
 let docSearchDebounce: ReturnType<typeof setTimeout> | null = null;
 const docSearchKeyword = ref('');
 const selectedFileType = ref('');
-const UNTAGGED_TAG_ID = '__untagged__';
 const fileTypeOptions = computed(() => [
   { content: t('knowledgeBase.allFileTypes') || '全部类型', value: '' },
   { content: 'PDF', value: 'pdf' },
@@ -90,11 +91,19 @@ const tagMap = computed<Record<string, any>>(() => {
   });
   return map;
 });
-const sidebarCategoryCount = computed(() => tagList.value.length);
+const tagListWithUntagged = computed(() => {
+  const pseudoUntagged = {
+    id: UNTAGGED_TAG_ID,
+    name: t('knowledgeBase.untagged') || '未分类',
+    knowledge_count: untaggedCount.value,
+  };
+  return [pseudoUntagged, ...tagList.value.filter((tag) => tag.id !== UNTAGGED_TAG_ID)];
+});
+const sidebarCategoryCount = computed(() => tagListWithUntagged.value.length);
 const filteredTags = computed(() => {
   const query = tagSearchQuery.value.trim().toLowerCase();
-  if (!query) return tagList.value;
-  return tagList.value.filter((tag) => (tag.name || '').toLowerCase().includes(query));
+  if (!query) return tagListWithUntagged.value;
+  return tagListWithUntagged.value.filter((tag) => (tag.name || '').toLowerCase().includes(query));
 });
 
 const editingTagInputRefs = new Map<string, TagInputInstance | null>();
@@ -150,13 +159,20 @@ const getKnowledgeType = (item: any) => {
   return '--';
 }
 
+const getActiveTagFilter = () => {
+  if (selectedTagId.value === UNTAGGED_TAG_ID) {
+    return UNTAGGED_TAG_ID;
+  }
+  return selectedTagId.value || undefined;
+};
+
 const loadKnowledgeFiles = (kbIdValue: string) => {
   if (!kbIdValue) return;
   getKnowled(
     {
       page: 1,
       page_size: pageSize,
-      tag_id: selectedTagId.value || undefined,
+      tag_id: getActiveTagFilter(),
       keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
       file_type: selectedFileType.value || undefined,
     },
@@ -170,6 +186,7 @@ const loadTags = async (kbIdValue: string, reset = false) => {
     tagTotal.value = 0;
     tagHasMore.value = false;
     tagPage.value = 1;
+    untaggedCount.value = 0;
     return;
   }
 
@@ -178,6 +195,7 @@ const loadTags = async (kbIdValue: string, reset = false) => {
     tagList.value = [];
     tagTotal.value = 0;
     tagHasMore.value = false;
+    untaggedCount.value = 0;
   }
 
   const currentPage = tagPage.value || 1;
@@ -193,6 +211,7 @@ const loadTags = async (kbIdValue: string, reset = false) => {
     const pageData = (res?.data || {}) as {
       data?: any[];
       total?: number;
+      untagged_count?: number;
     };
     const pageTags = (pageData.data || []).map((tag: any) => ({
       ...tag,
@@ -210,6 +229,7 @@ const loadTags = async (kbIdValue: string, reset = false) => {
     if (tagHasMore.value) {
       tagPage.value = currentPage + 1;
     }
+    untaggedCount.value = pageData.untagged_count ?? untaggedCount.value ?? 0;
   } catch (error) {
     console.error('Failed to load tags', error);
   } finally {
@@ -621,6 +641,18 @@ const handleDocumentUploadClick = () => {
   uploadInputRef.value?.click();
 };
 
+const applySelectedTagToKnowledge = async (knowledgeId?: string) => {
+  if (!knowledgeId) return;
+  const tagToApply = getActiveTagFilter();
+  if (!tagToApply || tagToApply === UNTAGGED_TAG_ID) return;
+
+  try {
+    await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagToApply } });
+  } catch (error) {
+    console.error('Failed to apply selected tag to uploaded knowledge', error);
+  }
+};
+
 const resetUploadInput = () => {
   if (uploadInputRef.value) {
     uploadInputRef.value.value = '';
@@ -663,6 +695,8 @@ const handleDocumentUpload = async (event: Event) => {
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
       if (isSuccess) {
         successCount++;
+        const knowledgeId = responseData?.data?.id || responseData?.data?.ID || responseData?.id;
+        await applySelectedTagToKnowledge(knowledgeId);
       } else {
         failCount++;
         let errorMessage = "上传失败！";
@@ -848,7 +882,7 @@ const handleScroll = () => {
     if (scrollTop + clientHeight >= scrollHeight) {
       page++;
       if (cardList.value.length < total.value && page <= pageNum) {
-        getKnowled({ page, page_size: pageSize, tag_id: selectedTagId.value, keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined, file_type: selectedFileType.value || undefined });
+        getKnowled({ page, page_size: pageSize, tag_id: getActiveTagFilter(), keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined, file_type: selectedFileType.value || undefined });
       }
     }
   }
