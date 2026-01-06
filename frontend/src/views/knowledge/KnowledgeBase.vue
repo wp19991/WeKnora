@@ -46,7 +46,8 @@ let knowledgeScroll = ref()
 let page = 1;
 let pageSize = 35;
 
-const selectedTagId = ref<string>("__untagged__");
+const UNTAGGED_TAG_ID = '__untagged__';
+const selectedTagId = ref<string>(UNTAGGED_TAG_ID);
 const tagList = ref<any[]>([]);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
@@ -59,7 +60,6 @@ let tagSearchDebounce: ReturnType<typeof setTimeout> | null = null;
 let docSearchDebounce: ReturnType<typeof setTimeout> | null = null;
 const docSearchKeyword = ref('');
 const selectedFileType = ref('');
-const UNTAGGED_TAG_ID = '__untagged__';
 const fileTypeOptions = computed(() => [
   { content: t('knowledgeBase.allFileTypes') || '全部类型', value: '' },
   { content: 'PDF', value: 'pdf' },
@@ -150,13 +150,20 @@ const getKnowledgeType = (item: any) => {
   return '--';
 }
 
+const getActiveTagFilter = () => {
+  if (selectedTagId.value === UNTAGGED_TAG_ID) {
+    return UNTAGGED_TAG_ID;
+  }
+  return selectedTagId.value || undefined;
+};
+
 const loadKnowledgeFiles = (kbIdValue: string) => {
   if (!kbIdValue) return;
   getKnowled(
     {
       page: 1,
       page_size: pageSize,
-      tag_id: selectedTagId.value || undefined,
+      tag_id: getActiveTagFilter(),
       keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
       file_type: selectedFileType.value || undefined,
     },
@@ -621,6 +628,18 @@ const handleDocumentUploadClick = () => {
   uploadInputRef.value?.click();
 };
 
+const applySelectedTagToKnowledge = async (knowledgeId?: string) => {
+  if (!knowledgeId) return;
+  const tagToApply = getActiveTagFilter();
+  if (!tagToApply || tagToApply === UNTAGGED_TAG_ID) return;
+
+  try {
+    await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagToApply } });
+  } catch (error) {
+    console.error('Failed to apply selected tag to uploaded knowledge', error);
+  }
+};
+
 const resetUploadInput = () => {
   if (uploadInputRef.value) {
     uploadInputRef.value.value = '';
@@ -663,6 +682,8 @@ const handleDocumentUpload = async (event: Event) => {
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
       if (isSuccess) {
         successCount++;
+        const knowledgeId = responseData?.data?.id || responseData?.data?.ID || responseData?.id;
+        await applySelectedTagToKnowledge(knowledgeId);
       } else {
         failCount++;
         let errorMessage = "上传失败！";
@@ -848,7 +869,7 @@ const handleScroll = () => {
     if (scrollTop + clientHeight >= scrollHeight) {
       page++;
       if (cardList.value.length < total.value && page <= pageNum) {
-        getKnowled({ page, page_size: pageSize, tag_id: selectedTagId.value, keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined, file_type: selectedFileType.value || undefined });
+        getKnowled({ page, page_size: pageSize, tag_id: getActiveTagFilter(), keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined, file_type: selectedFileType.value || undefined });
       }
     }
   }
